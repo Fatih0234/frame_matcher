@@ -3,3 +3,6 @@ opencv-python>=4.8.0
 pathlib
 numpy>=1.21.0
 PyYAML>=6.0
+label-studio-sdk>=0.0.34
+python-dotenv>=1.0.0
+requests>=2.31.0

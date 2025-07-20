@@ -29,12 +29,13 @@ class VideoMatcher:
         
         return video_files
     
-    def find_matching_video(self, json_video_path: str) -> Optional[Path]:
+    def find_matching_video(self, json_video_path: str, prefer_exact_match: bool = False) -> Optional[Path]:
         """
         Find the local video file that matches the JSON video path.
         
         Args:
             json_video_path: Video path from JSON (e.g., "/data/upload/4/3b780495-20250514_ride_bike_in_circles_60sec.mp4")
+            prefer_exact_match: If True, prioritize exact filename matching (useful for downloaded files)
             
         Returns:
             Path to matching local video file, or None if not found
@@ -42,10 +43,17 @@ class VideoMatcher:
         # Extract filename from JSON path
         json_filename = Path(json_video_path).name
         
-        # Strategy 1: Direct filename match
+        # Strategy 1: Direct filename match (always try this first)
         for video_file in self.video_files:
             if video_file.name == json_filename:
                 return video_file
+        
+        # If prefer_exact_match is True and no exact match found, return None
+        # This is useful when we know files should match exactly (e.g., downloaded files)
+        if prefer_exact_match:
+            print(f"❌ No exact match found for: {json_filename}")
+            print(f"Available video files: {[f.name for f in self.video_files]}")
+            return None
         
         # Strategy 2: Extract meaningful part after the dash
         # Look for pattern like "3b780495-20250514_ride_bike_in_circles_60sec.mp4"
