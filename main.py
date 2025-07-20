@@ -22,6 +22,9 @@ def main(
     project_path: str = typer.Option(None, "--project", "-p", help="Main project path (default: directory where main.py is located)"),
     auto_download: bool = typer.Option(False, "--auto-download", help="Automatically download annotations and videos from Label Studio"),
     project_id: int = typer.Option(None, "--project-id", help="Label Studio project ID (required if auto-download is used)"),
+    upload_to_drive: bool = typer.Option(False, "--upload-to-drive", help="Upload results to Google Drive"),
+    drive_folder_name: str = typer.Option(None, "--drive-folder", help="Google Drive folder name for dataset"),
+    drive_parent_id: str = typer.Option(None, "--drive-parent-id", help="Google Drive parent folder ID"),
 ):
     """
     Convert video annotations to specified format.
@@ -31,6 +34,9 @@ def main(
     
     With auto-download:
     python main.py --format yolo --classes '{"cyclist":0,"person":1,"scooter-roller":2}' --output ./dataset --auto-download --project-id 5
+    
+    With Google Drive upload:
+    python main.py --format yolo --classes '{"cyclist":0,"person":1,"scooter-roller":2}' --output ./dataset --upload-to-drive --drive-folder "my_yolo_dataset"
     """
     
     # Setup paths - use directory where main.py is located as default
@@ -144,6 +150,47 @@ def main(
         else:
             processor.convert_to_coco(output_path)
             typer.echo(f"✅ COCO dataset created successfully at {output_path}")
+        
+        # Upload to Google Drive if requested
+        if upload_to_drive:
+            typer.echo("🔵 Starting Google Drive upload...")
+            
+            try:
+                from utils.google_drive_uploader import GoogleDriveUploader
+                
+                # Set default folder name if not provided
+                if drive_folder_name is None:
+                    drive_folder_name = f"{format_type.upper()}_Dataset_{output_path.name}"
+                
+                # Initialize uploader
+                uploader = GoogleDriveUploader()
+                
+                # Upload dataset
+                uploaded_files = uploader.upload_dataset(
+                    dataset_path=output_path,
+                    drive_folder_name=drive_folder_name,
+                    parent_folder_id=drive_parent_id
+                )
+                
+                # Get folder URL for easy access
+                if uploaded_files:
+                    # Find the dataset folder ID (it will be the parent of uploaded files)
+                    dataset_folder_id = drive_parent_id  # This will be updated in the uploader
+                    folder_url = uploader.get_folder_url(dataset_folder_id)
+                    
+                    typer.echo("✅ Dataset uploaded to Google Drive successfully!")
+                    typer.echo(f"📁 Folder: {drive_folder_name}")
+                    typer.echo(f"🔗 URL: {folder_url}")
+                    typer.echo(f"📊 Files uploaded: {len(uploaded_files)}")
+                
+            except ImportError:
+                typer.echo("❌ Google Drive upload failed: Missing dependencies", err=True)
+                typer.echo("Install with: pip install google-api-python-client google-auth-httplib2 google-auth-oauthlib", err=True)
+            except FileNotFoundError as e:
+                typer.echo(f"❌ Google Drive upload failed: {e}", err=True)
+                typer.echo("Please follow the setup instructions in the README for Google Drive integration.", err=True)
+            except Exception as e:
+                typer.echo(f"❌ Google Drive upload failed: {e}", err=True)
             
     except Exception as e:
         typer.echo(f"❌ Error during processing: {e}", err=True)

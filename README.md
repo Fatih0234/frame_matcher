@@ -13,6 +13,7 @@ Convert video annotations from LabelStudio JSON format to YOLO or COCO format fo
 - ✅ Command-line interface with typer
 - ✅ **NEW**: Automatic download from Label Studio (no manual file handling)
 - ✅ **NEW**: Smart folder detection and exact filename matching
+- ✅ **NEW**: Google Drive integration for cloud storage
 - ✅ **OPTIMIZED**: High-performance batch frame extraction for large datasets
 - ✅ **OPTIMIZED**: Memory-efficient processing with configurable batch sizes
 
@@ -89,6 +90,17 @@ LABEL_STUDIO_URL=http://10.21.12.67
 LABEL_STUDIO_API_KEY=519b2038c9c45a461bab720013d98373873a998a
 PROJECT_ID=5
 ```
+
+## Setup for Google Drive Integration (Optional)
+
+To upload datasets directly to Google Drive:
+
+1. **Quick Setup**: See [GOOGLE_DRIVE_SETUP.md](./GOOGLE_DRIVE_SETUP.md) for detailed instructions
+2. **Download credentials**: Get OAuth credentials from Google Cloud Console
+3. **Place credentials**: Save as `credentials.json` in project root
+4. **First run**: Authentication will open in browser automatically
+
+**Alternative**: Use Google Drive Desktop client and set output path to synced folder.
 
 ## Project Structure
 
@@ -192,6 +204,28 @@ python main.py \
   --classes '{"cyclist":0,"person":1,"scooter-roller":2}' \
   --output ./dataset \
   --project "/path/to/your/project/"
+```
+
+#### Upload to Google Drive:
+```bash
+python main.py \
+  --format yolo \
+  --classes '{"cyclist":0,"person":1,"pedestrian":2}' \
+  --output ./dataset \
+  --upload-to-drive \
+  --drive-folder "My_YOLO_Dataset_2024"
+```
+
+#### Full workflow with auto-download and Google Drive:
+```bash
+python main.py \
+  --format yolo \
+  --classes '{"cyclist":0,"person":1,"pedestrian":2}' \
+  --output ./dataset \
+  --auto-download \
+  --project-id 5 \
+  --upload-to-drive \
+  --drive-folder "LabelStudio_Export_$(date +%Y%m%d)"
 ```
 
 **Note**: If `--project` is not specified, the script will use the directory where `main.py` is located as the project path.

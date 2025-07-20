@@ -68,6 +68,10 @@ myenv/
 .env.local
 .env.*.local
 
+# Google Drive API credentials and tokens
+credentials.json
+token.json
+
 # Dataset directories (generated output)
 dataset/
 test_dataset/
