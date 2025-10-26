@@ -1,0 +1,9 @@
+path: .
+train: images
+val: images
+test: images
+nc: 3
+names:
+- cyclist
+- pedestrian
+- scooter-roller

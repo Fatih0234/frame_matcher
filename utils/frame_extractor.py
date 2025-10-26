@@ -34,7 +34,7 @@ class FrameExtractor:
             cap = cv2.VideoCapture(str(video_path))
             
             if not cap.isOpened():
-                print(f"❌ Error: Cannot open video file {video_path}")
+                print(f"Error: Cannot open video file {video_path}")
                 return {fn: None for fn in frame_numbers}
             
             # Get video properties
@@ -58,7 +58,7 @@ class FrameExtractor:
                 ret, frame = cap.read()
                 
                 if not ret:
-                    print(f"❌ Error: Cannot read frame {frame_number} from {video_path.name}")
+                    print(f"Error: Cannot read frame {frame_number} from {video_path.name}")
                     results[frame_number] = None
                 else:
                     results[frame_number] = frame
@@ -67,7 +67,7 @@ class FrameExtractor:
             return results
             
         except Exception as e:
-            print(f"❌ Error extracting frames from {video_path}: {e}")
+            print(f"Error extracting frames from {video_path}: {e}")
             return {fn: None for fn in frame_numbers}
     
     def extract_frame(self, video_path: Path, frame_number: int) -> Optional[np.ndarray]:
@@ -114,5 +114,5 @@ class FrameExtractor:
             return info
             
         except Exception as e:
-            print(f"❌ Error getting video info for {video_path}: {e}")
+            print(f"Error getting video info for {video_path}: {e}")
             return {}
