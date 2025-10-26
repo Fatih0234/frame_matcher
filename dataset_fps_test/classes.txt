@@ -1,3 +1,0 @@
-cyclist
-pedestrian
-scooter-roller
