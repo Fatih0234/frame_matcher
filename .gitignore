@@ -76,6 +76,7 @@ coco_dataset/
 output/
 dataset_fps_test/
 test_multi/
+test_coco/
 
 # Video files (large files that shouldn't be in git)
 video_files/
@@ -151,6 +152,11 @@ tmp/
 temp/
 *.tmp
 *.temp
+
+# Testing documentation (generated during testing)
+TESTING_GUIDE.md
+TEST_SUMMARY.md
+QUICK_TEST_CHECKLIST.md
 
 # Keep example files but ignore actual data
 !.env.example
