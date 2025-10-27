@@ -1,16 +1,17 @@
-# Video Annotation Processor for YOLO
+# Video Annotation Processor for Object Detection
 
-A powerful Python tool for converting video annotations from Label Studio JSON format to YOLO format for object detection training. Features multi-project support, interactive selection, and optimized batch processing.
+A powerful Python tool for converting video annotations from Label Studio JSON format to multiple object detection formats (YOLO, COCO). Features multi-project support, interactive selection, and optimized batch processing.
 
 ## ✨ Key Features
 
+- **🎯 Multiple Export Formats**: Export to YOLO or COCO format with a single command
 - **🎯 Multi-Project Support**: Process videos from multiple Label Studio projects in a single run with automatic project mapping
 - **🖱️ Interactive Selection**: Browse and select projects and videos through intuitive CLI menus
 - **⚡ Performance Optimized**: Parallel processing with configurable workers and memory limits
 - **📊 Comprehensive Statistics**: Detailed dataset analysis and project mapping with frame/annotation counts
 - **🔄 Smart Video Matching**: Automatic video file matching and downloading from Label Studio
 - **🎨 Flexible Class Mapping**: Support for multiple object classes with custom ID assignment
-- **📦 YOLO Ready**: Direct output in YOLO format with auto-generated `data.yaml` and `classes.txt`
+- **📦 Training Ready**: Direct output in YOLO or COCO format with auto-generated config files
 - **🔀 FPS Control**: Optional frame rate limiting to reduce dataset size
 - **🧪 Fully Tested**: Comprehensive test suite with pytest (95%+ coverage)
 - **🔙 Backward Compatible**: Existing single-project workflows continue to work unchanged
@@ -99,6 +100,127 @@ python main.py \
   --classes '{"cyclist":0,"pedestrian":1,"scooter-roller":2}' \
   --output ./dataset \
   --project-id 5
+```
+
+## 🎯 Output Formats
+
+frame_matcher supports two industry-standard annotation formats for maximum compatibility with popular training frameworks:
+
+### YOLO Format (Default)
+
+Export annotations in YOLO format for Ultralytics YOLO, YOLOv8, and similar frameworks:
+
+```bash
+python main.py \
+  --format yolo \
+  --classes '{"cyclist":0,"pedestrian":1}' \
+  --output ./dataset \
+  --project-id 5
+```
+
+**YOLO Format Specifications:**
+- One `.txt` file per image in `labels/` directory
+- Format: `class_id center_x center_y width height`
+- All coordinates normalized to [0, 1]
+- Generates `classes.txt` and `data.yaml` config files
+
+**Output structure:**
+```
+dataset/
+├── images/              # Frame images
+├── labels/              # One .txt file per image
+│   └── frame_xxx.txt    # class_id cx cy w h (normalized)
+├── classes.txt          # Class names list
+└── data.yaml            # YOLO configuration
+```
+
+**Example annotation file** (`labels/frame_example_000001.txt`):
+```
+0 0.5234 0.6123 0.1245 0.2341
+1 0.7891 0.3456 0.0923 0.1567
+```
+
+### COCO Format
+
+Export annotations in COCO JSON format for Detectron2, MMDetection, and other COCO-compatible frameworks:
+
+```bash
+python main.py \
+  --format coco \
+  --classes '{"cyclist":0,"pedestrian":1}' \
+  --output ./dataset \
+  --project-id 5
+```
+
+**COCO Format Specifications:**
+- Single `annotations.json` file containing all annotations
+- Images, annotations, and categories arrays
+- Bounding boxes in [x_min, y_min, width, height] absolute pixel coordinates
+- Compatible with COCO dataset format: https://cocodataset.org/#format-data
+
+**Output structure:**
+```
+dataset/
+├── images/              # Frame images
+└── annotations.json     # COCO format JSON
+```
+
+**COCO JSON structure:**
+```json
+{
+  "info": {
+    "description": "Label Studio Video Annotations - COCO Format",
+    "version": "1.0",
+    "year": 2025,
+    "contributor": "frame_matcher",
+    "date_created": "2025-01-27T10:30:00"
+  },
+  "images": [
+    {
+      "id": 1,
+      "file_name": "frame_video1_000001.jpg",
+      "width": 1920,
+      "height": 1080
+    }
+  ],
+  "annotations": [
+    {
+      "id": 1,
+      "image_id": 1,
+      "category_id": 0,
+      "bbox": [100.5, 200.3, 150.2, 180.7],
+      "area": 27141.14,
+      "iscrowd": 0
+    }
+  ],
+  "categories": [
+    {
+      "id": 0,
+      "name": "cyclist",
+      "supercategory": "object"
+    }
+  ]
+}
+```
+
+### Format Comparison
+
+| Feature | YOLO | COCO |
+|---------|------|------|
+| **File Type** | Multiple .txt files | Single .json file |
+| **Coordinates** | Normalized (0-1) | Absolute pixels |
+| **Box Format** | center_x, center_y, w, h | x_min, y_min, w, h |
+| **Best For** | Ultralytics YOLO, YOLOv8 | Detectron2, MMDetection |
+| **Advantages** | Simple, human-readable | Rich metadata, standard format |
+
+### Default Behavior
+
+If `--format` is not specified, YOLO format is used by default to maintain backward compatibility:
+
+```bash
+# These two commands are equivalent:
+python main.py --classes '{"test":0}' --output ./dataset --project-id 5
+python main.py --format yolo --classes '{"test":0}' --output ./dataset --project-id 5
 ```
 
 ## 📁 Output Structure
@@ -269,6 +391,7 @@ Enable with `--benchmark` to get detailed performance metrics:
 ### Optional Parameters
 | Parameter | Short | Default | Description |
 |-----------|-------|---------|-------------|
+| `--format` | `-f` | `yolo` | Output format: `yolo` or `coco` |
 | `--project` | `-p` | Current dir | Main project path |
 | `--workers` | `-w` | `4` | Maximum parallel workers |
 | `--memory` | `-m` | `2048` | Memory limit in MB |
@@ -338,6 +461,26 @@ python main.py \
 ```
 Then in the interactive prompt, enter: `1-5,8,10-12`
 _Processes projects 1,2,3,4,5,8,10,11,12_
+
+### Example 8: Export in COCO format
+```bash
+python main.py \
+  --format coco \
+  --classes '{"cyclist":0,"person":1,"scooter-roller":2}' \
+  --output ./dataset_coco \
+  --project-id 5
+```
+_Generates COCO-format annotations.json for Detectron2/MMDetection_
+
+### Example 9: Multi-project with COCO format
+```bash
+python main.py \
+  --format coco \
+  --classes '{"cyclist":0,"person":1}' \
+  --output ./dataset_multi_coco \
+  --project-ids 5,7,12
+```
+_Combines multiple projects into a single COCO dataset_
 
 ## 📝 YOLO Format Details
 
