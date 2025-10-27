@@ -18,10 +18,61 @@ import requests
 from utils.annotation_processor import AnnotationProcessor
 from utils.downloader import LabelStudioDownloader
 from utils.interactive_selector import create_interactive_selector
+from exporters import YOLOExporter, COCOExporter
+from urllib3.exceptions import NewConnectionError, MaxRetryError
+from requests.exceptions import ConnectionError, RequestException
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+
+
+def check_label_studio_connection(url: str, api_key: str) -> bool:
+    """
+    Test Label Studio server connectivity with user-friendly error messages.
+
+    Args:
+        url: Label Studio server URL
+        api_key: Label Studio API key
+
+    Returns:
+        True if connection successful, exits program otherwise
+    """
+    try:
+        # Quick connectivity test with short timeout
+        api_url = f"{url.rstrip('/')}/api/version"
+        headers = {
+            'Authorization': f'Token {api_key}',
+            'Content-Type': 'application/json'
+        }
+
+        response = requests.get(api_url, headers=headers, timeout=5)
+        response.raise_for_status()
+        return True
+
+    except (ConnectionError, NewConnectionError, MaxRetryError, RequestException) as e:
+        # User-friendly error message for network issues
+        typer.echo("\n" + "="*70, err=True)
+        typer.echo("❌ CONNECTION ERROR: Cannot reach Label Studio server", err=True)
+        typer.echo("="*70, err=True)
+        typer.echo(f"\nServer URL: {url}", err=True)
+        typer.echo("\n🔍 Possible causes:", err=True)
+        typer.echo("   1. 🌐 VPN required: If connecting to university/corporate server,", err=True)
+        typer.echo("      ensure your VPN (e.g., Global Protect) is connected", err=True)
+        typer.echo("   2. 🔌 Network down: Check your internet connection", err=True)
+        typer.echo("   3. 🖥️  Server offline: Label Studio server may be unavailable", err=True)
+        typer.echo("   4. 🔗 Wrong URL: Verify LABEL_STUDIO_URL in your .env file", err=True)
+        typer.echo("\n💡 Quick troubleshooting:", err=True)
+        typer.echo("   • Connect to VPN if required", err=True)
+        typer.echo(f"   • Try opening {url} in your web browser", err=True)
+        typer.echo("   • Check .env file has correct LABEL_STUDIO_URL", err=True)
+        typer.echo("="*70 + "\n", err=True)
+        raise typer.Exit(1)
+
+    except Exception as e:
+        typer.echo(f"\n❌ Unexpected error connecting to Label Studio: {e}", err=True)
+        typer.echo(f"Server URL: {url}\n", err=True)
+        raise typer.Exit(1)
 
 
 def list_available_projects(url: str, api_key: str) -> List[Dict[str, Any]]:
@@ -191,7 +242,8 @@ def process_single_project(
     max_workers: int,
     memory_limit: int,
     fps_limit: Optional[float],
-    benchmark: bool
+    benchmark: bool,
+    format: str = "yolo"
 ) -> Dict[str, Any]:
     """
     Process a single project and return statistics.
@@ -262,7 +314,13 @@ def process_single_project(
             project_id=project_id  # Pass project_id for file naming
         )
 
-        processor.convert_to_yolo(output_path)
+        # Create appropriate exporter based on format
+        if format.lower() == "coco":
+            exporter = COCOExporter(output_path, class_mappings)
+        else:  # Default to YOLO
+            exporter = YOLOExporter(output_path, class_mappings)
+
+        processor.convert_with_exporter(output_path, exporter)
 
         # Get statistics
         stats = processor.get_performance_stats()
@@ -290,7 +348,8 @@ def process_multiple_projects(
     max_workers: int,
     memory_limit: int,
     fps_limit: Optional[float],
-    benchmark: bool
+    benchmark: bool,
+    format: str = "yolo"
 ) -> None:
     """
     Process multiple projects and generate combined dataset with project_mapping.json.
@@ -327,7 +386,8 @@ def process_multiple_projects(
             max_workers=max_workers,
             memory_limit=memory_limit,
             fps_limit=fps_limit,
-            benchmark=benchmark
+            benchmark=benchmark,
+            format=format
         )
 
         if stats:
@@ -365,16 +425,18 @@ def main(
     project_id: Optional[int] = typer.Option(None, "--project-id", help="Single Label Studio project ID (for backward compatibility)"),
     project_ids: Optional[str] = typer.Option(None, "--project-ids", help="Comma-separated list of project IDs (e.g., '5,7,12')"),
     list_projects: bool = typer.Option(False, "--list-projects", help="List all available projects and exit"),
+    format: str = typer.Option("yolo", "--format", "-f", help="Output format: 'yolo' or 'coco' (default: yolo)"),
     max_workers: int = typer.Option(4, "--workers", "-w", help="Maximum number of parallel workers (default: 4)"),
     memory_limit: int = typer.Option(2048, "--memory", "-m", help="Memory limit in MB for batch processing (default: 2048)"),
     fps_limit: Optional[float] = typer.Option(None, "--fps-limit", help="Limit frames per second extraction (e.g., 2.0 for 2 FPS, None for all frames)"),
     benchmark: bool = typer.Option(False, "--benchmark", help="Enable detailed performance benchmarking"),
 ):
     """
-    Convert video annotations to YOLO format with optimized processing.
-    Supports single-project and multi-project workflows.
+    Convert video annotations to object detection format with optimized processing.
+    Supports YOLO and COCO formats, single-project and multi-project workflows.
 
     Features:
+    - Multiple export formats (YOLO, COCO)
     - Multi-project support with automatic project selection
     - Interactive video selection from Label Studio
     - Automatic download from Label Studio
@@ -388,14 +450,17 @@ def main(
     # List all available projects
     python main.py --list-projects
 
-    # Interactive mode (select projects interactively)
+    # Interactive mode with YOLO format (default)
     python main.py --classes '{"cyclist":0,"person":1,"scooter-roller":2}' --output ./dataset
+
+    # Export in COCO format
+    python main.py --classes '{"cyclist":0,"person":1}' --output ./dataset --format coco
 
     # Process multiple projects
     python main.py --classes '{"cyclist":0,"person":1,"scooter-roller":2}' --output ./dataset --project-ids 5,7,12
 
     # Single project (backward compatible)
-    python main.py --classes '{"cyclist":0,"person":1,"scooter-roller":2}' --output ./dataset --project-id 5
+    python main.py --classes '{"cyclist":0,"person":1,"scooter-roller":2}' --output ./dataset --project-id 5 --format yolo
 
     # With performance optimization
     python main.py --classes '{"cyclist":0,"person":1,"scooter-roller":2}' --output ./dataset --project-ids 5,7 --workers 8 --memory 4096 --benchmark
@@ -423,10 +488,24 @@ def main(
         typer.echo("Please create a .env file with the required credentials.", err=True)
         raise typer.Exit(1)
 
+    # Test connection to Label Studio server early (with user-friendly error handling)
+    typer.echo("🔗 Testing connection to Label Studio server...")
+    check_label_studio_connection(url, api_key)
+    typer.echo("✓ Connected successfully!\n")
+
     # Handle --list-projects mode (list and exit)
     if list_projects:
         list_available_projects(url, api_key)
         raise typer.Exit(0)
+
+    # Validate format
+    format_lower = format.lower()
+    if format_lower not in ["yolo", "coco"]:
+        typer.echo(f"❌ Error: Unsupported format '{format}'", err=True)
+        typer.echo("   Supported formats: 'yolo', 'coco'", err=True)
+        raise typer.Exit(1)
+
+    typer.echo(f"📋 Export format: {format_lower.upper()}")
 
     # Determine which project(s) to process
     selected_project_ids: List[int] = []
@@ -542,8 +621,14 @@ def main(
                 fps_limit=fps_limit
             )
 
-            processor.convert_to_yolo(output_path)
-            typer.echo(f"YOLO dataset created successfully at {output_path}")
+            # Create appropriate exporter based on format
+            if format_lower == "coco":
+                exporter = COCOExporter(output_path, class_mappings)
+            else:  # Default to YOLO
+                exporter = YOLOExporter(output_path, class_mappings)
+
+            processor.convert_with_exporter(output_path, exporter)
+            typer.echo(f"{format_lower.upper()} dataset created successfully at {output_path}")
 
             total_time = time.time() - total_start_time
             typer.echo(f"\nTotal Runtime: {total_time:.2f}s")
@@ -574,7 +659,8 @@ def main(
                 max_workers=max_workers,
                 memory_limit=memory_limit,
                 fps_limit=fps_limit,
-                benchmark=benchmark
+                benchmark=benchmark,
+                format=format_lower
             )
 
             total_time = time.time() - total_start_time
