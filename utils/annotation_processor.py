@@ -318,12 +318,13 @@ class AnnotationProcessor:
     This replaces both the original and optimized annotation processors.
     """
     
-    def __init__(self, annotations_file: Path, video_files_dir: Path, 
+    def __init__(self, annotations_file: Path, video_files_dir: Path,
                  class_mappings: Dict[str, int], use_exact_matching: bool = False,
-                 max_workers: int = 4, memory_limit_mb: int = 2048, fps_limit: Optional[float] = None):
+                 max_workers: int = 4, memory_limit_mb: int = 2048, fps_limit: Optional[float] = None,
+                 project_id: Optional[int] = None):
         """
         Initialize the annotation processor.
-        
+
         Args:
             annotations_file: Path to the JSON annotations file
             video_files_dir: Directory containing video files
@@ -332,11 +333,13 @@ class AnnotationProcessor:
             max_workers: Maximum number of parallel workers for optimization
             memory_limit_mb: Memory limit for batch processing
             fps_limit: Target frames per second for sampling (None = extract all frames)
+            project_id: Optional Label Studio project ID for multi-project support (adds prefix to filenames)
         """
         self.annotations_file = annotations_file
         self.video_files_dir = video_files_dir
         self.class_mappings = class_mappings
         self.use_exact_matching = use_exact_matching
+        self.project_id = project_id
         self.max_workers = max_workers
         self.memory_limit_mb = memory_limit_mb
         self.fps_limit = fps_limit
@@ -744,20 +747,28 @@ class AnnotationProcessor:
             
             # Save frame image
             start_time = time.time()
-            image_filename = f"frame_{video_file.stem}_{frame_num:06d}.jpg"
+
+            # Generate filename with optional project prefix
+            if self.project_id is not None:
+                image_filename = f"project{self.project_id}_frame_{video_file.stem}_{frame_num:06d}.jpg"
+                label_filename = f"project{self.project_id}_frame_{video_file.stem}_{frame_num:06d}.txt"
+            else:
+                image_filename = f"frame_{video_file.stem}_{frame_num:06d}.jpg"
+                label_filename = f"frame_{video_file.stem}_{frame_num:06d}.txt"
+
             image_path = output_images_dir / image_filename
-            
+
             success = cv2.imwrite(str(image_path), frame_image)
             if not success:
                 logger.warning(f"Failed to write image {image_path}")
                 continue
-            
+
             self.performance_stats['io_time'] = self.performance_stats.get('io_time', 0) + (time.time() - start_time)
-            
+
             # Create optimized annotations (YOLO only)
             self._create_optimized_yolo_annotation(
-                annotations, frame_image.shape, output_labels_dir, 
-                f"frame_{video_file.stem}_{frame_num:06d}.txt", converter
+                annotations, frame_image.shape, output_labels_dir,
+                label_filename, converter
             )
             
             successful_count += 1
