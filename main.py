@@ -13,6 +13,7 @@ import logging
 import time
 from typing import List, Dict, Any, Optional
 from label_studio_sdk import Client
+import requests
 
 from utils.annotation_processor import AnnotationProcessor
 from utils.downloader import LabelStudioDownloader
@@ -35,8 +36,22 @@ def list_available_projects(url: str, api_key: str) -> List[Dict[str, Any]]:
         List of project dictionaries with id, title, and task count
     """
     try:
-        client = Client(url=url, api_key=api_key)
-        projects = client.projects.list()
+        # Use Label Studio REST API to list all projects
+        # API endpoint: GET /api/projects
+        api_url = f"{url.rstrip('/')}/api/projects"
+        headers = {
+            'Authorization': f'Token {api_key}',
+            'Content-Type': 'application/json'
+        }
+
+        response = requests.get(api_url, headers=headers)
+        response.raise_for_status()
+
+        projects = response.json()
+
+        # Handle both list and paginated response formats
+        if isinstance(projects, dict) and 'results' in projects:
+            projects = projects['results']
 
         if not projects:
             typer.echo("No projects found on Label Studio server.")
@@ -68,8 +83,13 @@ def list_available_projects(url: str, api_key: str) -> List[Dict[str, Any]]:
         typer.echo("="*80 + "\n")
         return project_list
 
+    except requests.exceptions.RequestException as e:
+        typer.echo(f"Error connecting to Label Studio: {e}", err=True)
+        return []
     except Exception as e:
         typer.echo(f"Error fetching projects: {e}", err=True)
+        import traceback
+        traceback.print_exc()
         return []
 
 
