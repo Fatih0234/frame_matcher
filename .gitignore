@@ -75,6 +75,7 @@ yolo_dataset/
 coco_dataset/
 output/
 dataset_fps_test/
+test_multi/
 
 # Video files (large files that shouldn't be in git)
 video_files/
