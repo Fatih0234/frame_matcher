@@ -290,6 +290,65 @@ The tool maintains full backward compatibility with existing workflows:
 - Single-project mode uses the original file naming (without project prefix)
 - All existing scripts and workflows continue to work unchanged
 
+## Testing
+
+The project includes a comprehensive test suite using pytest.
+
+### Installing Test Dependencies
+
+```bash
+pip install -r requirements.txt
+```
+
+This will install pytest, pytest-cov, and pytest-mock along with the main dependencies.
+
+### Running Tests
+
+```bash
+# Run all tests
+pytest test_frame_matcher.py -v
+
+# Run with coverage report
+pytest test_frame_matcher.py --cov=. --cov-report=html
+
+# Run specific test class
+pytest test_frame_matcher.py::TestListAvailableProjects -v
+
+# Run specific test
+pytest test_frame_matcher.py::TestListAvailableProjects::test_list_projects_success -v
+
+# Run tests and stop at first failure
+pytest test_frame_matcher.py -x
+
+# View coverage report
+open htmlcov/index.html  # On macOS
+```
+
+### Test Coverage
+
+The test suite covers:
+- ✅ **API Integration**: Label Studio REST API calls and error handling
+- ✅ **CLI Arguments**: Argument parsing and validation
+- ✅ **Interactive Selection**: Project and video selection workflows
+- ✅ **File Naming**: Single-project and multi-project file naming conventions
+- ✅ **Error Handling**: Connection errors, invalid inputs, edge cases
+- ✅ **Multi-Project**: Project mapping generation and statistics
+- ✅ **Backward Compatibility**: Existing single-project workflows
+
+### Writing New Tests
+
+When adding new features, add corresponding tests to `test_frame_matcher.py`:
+
+```python
+class TestYourNewFeature:
+    """Test your new feature."""
+
+    def test_basic_functionality(self):
+        """Test the basic functionality."""
+        # Your test code here
+        assert expected == actual
+```
+
 ## Notes
 
 - Only annotated frames are extracted (not all video frames)
