@@ -19,10 +19,60 @@ from utils.annotation_processor import AnnotationProcessor
 from utils.downloader import LabelStudioDownloader
 from utils.interactive_selector import create_interactive_selector
 from exporters import YOLOExporter, COCOExporter
+from urllib3.exceptions import NewConnectionError, MaxRetryError
+from requests.exceptions import ConnectionError, RequestException
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+
+
+def check_label_studio_connection(url: str, api_key: str) -> bool:
+    """
+    Test Label Studio server connectivity with user-friendly error messages.
+
+    Args:
+        url: Label Studio server URL
+        api_key: Label Studio API key
+
+    Returns:
+        True if connection successful, exits program otherwise
+    """
+    try:
+        # Quick connectivity test with short timeout
+        api_url = f"{url.rstrip('/')}/api/version"
+        headers = {
+            'Authorization': f'Token {api_key}',
+            'Content-Type': 'application/json'
+        }
+
+        response = requests.get(api_url, headers=headers, timeout=5)
+        response.raise_for_status()
+        return True
+
+    except (ConnectionError, NewConnectionError, MaxRetryError, RequestException) as e:
+        # User-friendly error message for network issues
+        typer.echo("\n" + "="*70, err=True)
+        typer.echo("❌ CONNECTION ERROR: Cannot reach Label Studio server", err=True)
+        typer.echo("="*70, err=True)
+        typer.echo(f"\nServer URL: {url}", err=True)
+        typer.echo("\n🔍 Possible causes:", err=True)
+        typer.echo("   1. 🌐 VPN required: If connecting to university/corporate server,", err=True)
+        typer.echo("      ensure your VPN (e.g., Global Protect) is connected", err=True)
+        typer.echo("   2. 🔌 Network down: Check your internet connection", err=True)
+        typer.echo("   3. 🖥️  Server offline: Label Studio server may be unavailable", err=True)
+        typer.echo("   4. 🔗 Wrong URL: Verify LABEL_STUDIO_URL in your .env file", err=True)
+        typer.echo("\n💡 Quick troubleshooting:", err=True)
+        typer.echo("   • Connect to VPN if required", err=True)
+        typer.echo(f"   • Try opening {url} in your web browser", err=True)
+        typer.echo("   • Check .env file has correct LABEL_STUDIO_URL", err=True)
+        typer.echo("="*70 + "\n", err=True)
+        raise typer.Exit(1)
+
+    except Exception as e:
+        typer.echo(f"\n❌ Unexpected error connecting to Label Studio: {e}", err=True)
+        typer.echo(f"Server URL: {url}\n", err=True)
+        raise typer.Exit(1)
 
 
 def list_available_projects(url: str, api_key: str) -> List[Dict[str, Any]]:
@@ -437,6 +487,11 @@ def main(
         typer.echo("Error: .env file must contain LABEL_STUDIO_URL and LABEL_STUDIO_API_KEY", err=True)
         typer.echo("Please create a .env file with the required credentials.", err=True)
         raise typer.Exit(1)
+
+    # Test connection to Label Studio server early (with user-friendly error handling)
+    typer.echo("🔗 Testing connection to Label Studio server...")
+    check_label_studio_connection(url, api_key)
+    typer.echo("✓ Connected successfully!\n")
 
     # Handle --list-projects mode (list and exit)
     if list_projects:
