@@ -872,3 +872,232 @@ class AnnotationProcessor:
     def get_performance_stats(self) -> Dict[str, Any]:
         """Get performance statistics for benchmarking."""
         return self.performance_stats.copy()
+
+    def convert_with_exporter(self, output_path: Path, exporter):
+        """
+        Convert annotations using a custom exporter.
+
+        This method supports any exporter that implements the BaseExporter interface,
+        enabling export to multiple formats (YOLO, COCO, etc.).
+
+        Args:
+            output_path: Base output directory (exporter will create subdirectories as needed)
+            exporter: An instance of a class implementing the BaseExporter interface
+        """
+        start_time = time.time()
+        logger.info(f"Converting annotations using {exporter.__class__.__name__}...")
+
+        # Process annotations in parallel
+        processed_data = self._process_annotations_parallel()
+
+        # Create images directory (shared across all formats)
+        images_dir = output_path / "images"
+        images_dir.mkdir(parents=True, exist_ok=True)
+
+        total_successful = 0
+        total_frames = 0
+
+        # Process each video
+        for video_data in processed_data.values():
+            successful, frames = self._process_video_frames_with_exporter(
+                video_data, images_dir, exporter
+            )
+            total_successful += successful
+            total_frames += frames
+            self.performance_stats['videos_processed'] = self.performance_stats.get('videos_processed', 0) + 1
+
+        # Finalize exporter (write config files, etc.)
+        start_time_io = time.time()
+        exporter.finalize()
+        self.performance_stats['io_time'] = self.performance_stats.get('io_time', 0) + (time.time() - start_time_io)
+
+        self.performance_stats['total_processing_time'] = time.time() - start_time
+
+        logger.info(f"🎉 Conversion complete! "
+                   f"Processed {total_successful}/{total_frames} frames from "
+                   f"{self.performance_stats.get('videos_processed', 0)} videos")
+
+        self._log_performance_stats()
+
+        # Generate dataset analysis report
+        self.dataset_analyzer.generate_report()
+
+    def _process_video_frames_with_exporter(self, video_data: Dict[str, Any],
+                                          output_images_dir: Path,
+                                          exporter) -> Tuple[int, int]:
+        """Process all frames for a single video using a custom exporter."""
+        video_file = video_data['video_file']
+        frame_annotations = video_data['frame_annotations']
+
+        if not frame_annotations:
+            return 0, 0
+
+        # Initialize statistics tracking for this video
+        video_objects_per_class = {class_name: 0 for class_name in self.class_mappings.keys()}
+
+        # Get video info for optimal batching
+        video_info = self.frame_extractor.get_video_info_cached(str(video_file))
+        if not video_info:
+            logger.error(f"Could not get video info for {video_file}")
+            return 0, 0
+
+        # Calculate optimal batch size
+        optimal_batch_size = self.frame_extractor.calculate_optimal_batch_size(
+            video_info['width'], video_info['height'], self.memory_limit_mb
+        )
+
+        frame_numbers = list(frame_annotations.keys())
+        total_frames = len(frame_numbers)
+        successful_extractions = 0
+
+        logger.info(f"Processing {total_frames} frames from {video_file.name} "
+                   f"(batch size: {optimal_batch_size})")
+
+        # Process frames in optimized batches
+        for i in range(0, len(frame_numbers), optimal_batch_size):
+            batch_frames = frame_numbers[i:i + optimal_batch_size]
+            batch_end = min(i + optimal_batch_size, len(frame_numbers))
+
+            logger.debug(f"Processing batch {i//optimal_batch_size + 1}: "
+                        f"frames {i+1}-{batch_end} of {total_frames}")
+
+            # Extract frames using optimized method
+            start_time = time.time()
+            extracted_frames = self.frame_extractor.extract_frames_batch_optimized(
+                video_file, batch_frames
+            )
+            self.performance_stats['extraction_time'] = self.performance_stats.get('extraction_time', 0) + (time.time() - start_time)
+
+            # Process each frame in the batch
+            start_time = time.time()
+            batch_object_counts = self._process_frame_batch_with_exporter(
+                batch_frames, extracted_frames, frame_annotations,
+                output_images_dir, video_file, video_info, exporter
+            )
+            successful_extractions += batch_object_counts['successful_frames']
+
+            # Accumulate object counts for this video
+            for class_name, count in batch_object_counts['objects_per_class'].items():
+                video_objects_per_class[class_name] += count
+
+            self.performance_stats['conversion_time'] = self.performance_stats.get('conversion_time', 0) + (time.time() - start_time)
+
+        # Record statistics for this video
+        self.dataset_analyzer.add_video_stats(
+            video_file.name, successful_extractions, video_objects_per_class
+        )
+
+        return successful_extractions, total_frames
+
+    def _process_frame_batch_with_exporter(self, batch_frames: List[int],
+                                         extracted_frames: Dict[int, np.ndarray],
+                                         frame_annotations: Dict[int, List[Dict]],
+                                         output_images_dir: Path,
+                                         video_file: Path,
+                                         video_info: Dict[str, Any],
+                                         exporter) -> Dict[str, Any]:
+        """Process a batch of extracted frames using a custom exporter."""
+        successful_count = 0
+        batch_objects_per_class = {class_name: 0 for class_name in self.class_mappings.keys()}
+
+        for frame_num in batch_frames:
+            frame_image = extracted_frames.get(frame_num)
+            if frame_image is None:
+                continue
+
+            annotations = frame_annotations[frame_num]
+
+            # Count objects by class in this frame
+            for ann in annotations:
+                class_name = ann.get('class_name', '')
+                if class_name in batch_objects_per_class:
+                    batch_objects_per_class[class_name] += 1
+
+            # Save frame image
+            start_time = time.time()
+
+            # Generate filename with optional project prefix
+            if self.project_id is not None:
+                image_filename = f"project{self.project_id}_frame_{video_file.stem}_{frame_num:06d}.jpg"
+            else:
+                image_filename = f"frame_{video_file.stem}_{frame_num:06d}.jpg"
+
+            image_path = output_images_dir / image_filename
+
+            success = cv2.imwrite(str(image_path), frame_image)
+            if not success:
+                logger.warning(f"Failed to write image {image_path}")
+                continue
+
+            self.performance_stats['io_time'] = self.performance_stats.get('io_time', 0) + (time.time() - start_time)
+
+            # Prepare frame data for exporter
+            # Convert from Label Studio format to exporter format
+            frame_data = self._prepare_frame_data_for_exporter(annotations, video_info)
+
+            # Export using the custom exporter
+            start_time = time.time()
+            exporter.export_frame(
+                frame_data=frame_data,
+                image_filename=image_filename,
+                frame_width=video_info['width'],
+                frame_height=video_info['height']
+            )
+            self.performance_stats['conversion_time'] = self.performance_stats.get('conversion_time', 0) + (time.time() - start_time)
+
+            successful_count += 1
+            self.performance_stats['frames_extracted'] = self.performance_stats.get('frames_extracted', 0) + 1
+
+        return {
+            'successful_frames': successful_count,
+            'objects_per_class': batch_objects_per_class
+        }
+
+    def _prepare_frame_data_for_exporter(self, annotations: List[Dict],
+                                        video_info: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Convert Label Studio annotations to exporter format.
+
+        Args:
+            annotations: List of annotation dictionaries from Label Studio
+            video_info: Video metadata including width and height
+
+        Returns:
+            Dictionary with 'bboxes' key containing normalized bbox data
+        """
+        img_width = video_info['width']
+        img_height = video_info['height']
+
+        bboxes = []
+        for ann in annotations:
+            # Convert from Label Studio percentage format to normalized coordinates
+            x_percent = ann['x']
+            y_percent = ann['y']
+            width_percent = ann['width']
+            height_percent = ann['height']
+
+            # Convert to normalized coordinates (0-1)
+            x_norm = x_percent / 100.0
+            y_norm = y_percent / 100.0
+            width_norm = width_percent / 100.0
+            height_norm = height_percent / 100.0
+
+            # Calculate center coordinates (YOLO format)
+            cx = x_norm + (width_norm / 2.0)
+            cy = y_norm + (height_norm / 2.0)
+
+            # Ensure coordinates are within bounds
+            cx = max(0.0, min(1.0, cx))
+            cy = max(0.0, min(1.0, cy))
+            width_norm = max(0.0, min(1.0, width_norm))
+            height_norm = max(0.0, min(1.0, height_norm))
+
+            bboxes.append({
+                'label': ann['class_name'],
+                'cx': cx,
+                'cy': cy,
+                'w': width_norm,
+                'h': height_norm
+            })
+
+        return {'bboxes': bboxes}
