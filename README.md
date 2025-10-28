@@ -223,9 +223,72 @@ python main.py --classes '{"test":0}' --output ./dataset --project-id 5
 python main.py --format yolo --classes '{"test":0}' --output ./dataset --project-id 5
 ```
 
-## 📁 Output Structure
+## 📁 Directory Structure
 
-### Single Project Mode
+The tool uses **two separate directories** for better organization:
+
+### 1️⃣ Cache Directory (`--cache-dir`)
+
+**Purpose:** Stores downloaded videos and annotations from Label Studio
+
+**Default location:** `label_studio_data/`
+
+**Structure:**
+```
+label_studio_data/
+├── videos/
+│   ├── project_5/           # Videos from project 5
+│   │   ├── video1.mp4
+│   │   └── video2.mp4
+│   └── project_7/           # Videos from project 7
+│       └── video3.mp4
+└── annotations/
+    ├── project_5/           # Annotations from project 5
+    │   └── annotations.json
+    └── project_7/           # Annotations from project 7
+        └── annotations.json
+```
+
+**Why it exists:**
+- 🔄 Avoid re-downloading when re-processing with different settings
+- 💾 Speeds up experimentation (change FPS, formats, etc.)
+- 🧹 Can be safely deleted after you're done to save disk space
+
+**Customize the cache location:**
+```bash
+# Use a custom cache directory
+python main.py \
+  --cache-dir ./my_downloads \
+  --classes '{"cyclist":0}' \
+  --output ./dataset \
+  --project-id 5
+
+# Use /tmp for automatic cleanup on reboot
+python main.py \
+  --cache-dir /tmp/label_studio_cache \
+  --classes '{"cyclist":0}' \
+  --output ./dataset \
+  --project-id 5
+```
+
+### 2️⃣ Output Directory (`--output`)
+
+**Purpose:** Final training dataset (extracted frames and labels)
+
+**Location:** You specify this with `--output`
+
+**Structure:** See "Output Dataset Structure" below
+
+**Why it exists:**
+- 📦 This is your actual training data
+- ✅ Keep this directory - it's what you'll use for training
+- 📊 Much smaller than cache (only frames, not full videos)
+
+---
+
+### Output Dataset Structure
+
+## Single Project Mode
 ```
 dataset/
 ├── images/
@@ -319,15 +382,37 @@ Define object classes with their numeric IDs as a JSON string:
 - All projects in a multi-project run must use the same class schema
 
 ### Performance Tuning
+
+#### Memory & Worker Configuration
+The tool includes automatic memory detection and will warn you if your configuration exceeds safe limits.
+
 - `--workers` (`-w`): Number of parallel processing workers (default: 4)
-  - Increase for faster processing on multi-core systems
-  - Recommended: Number of CPU cores - 1
-- `--memory` (`-m`): Memory limit in MB for batch processing (default: 2048)
-  - Increase if processing high-resolution videos
-  - Decrease if experiencing out-of-memory errors
+  - Workers process **multiple videos** in parallel, not single video frames
+  - More workers won't speed up single video processing (I/O bound)
+  - Recommended: 2-4 workers for most systems
+- `--memory` (`-m`): Memory limit in MB per worker (default: 2048)
+  - Total memory usage ≈ workers × memory setting
+  - Tool automatically detects available memory and warns if unsafe
+  - Recommended: 2048MB per worker
 - `--fps-limit`: Limit frame extraction rate (optional)
   - Example: `--fps-limit 2.0` extracts 2 frames per second
   - Useful for reducing dataset size while maintaining temporal coverage
+
+#### Benchmarking Performance
+To test different configurations, use the `time` command:
+
+```bash
+# Test with 2 workers and 2048MB memory
+time python main.py --project-id 5 \
+  --classes '{"cyclist":0,"pedestrian":1,"scooter-roller":2}' \
+  --output ./test --workers 2 --memory 2048
+```
+
+**Performance Notes:**
+- Frame extraction is typically the bottleneck (70-80% of processing time)
+- I/O speed (disk/network) often matters more than CPU or worker count
+- If videos are on network storage (e.g., iCloud Drive), consider moving to local disk for faster processing
+- The tool's built-in `--benchmark` flag provides detailed timing breakdowns
 
 ### Environment Variables (.env)
 ```env
@@ -393,6 +478,7 @@ Enable with `--benchmark` to get detailed performance metrics:
 |-----------|-------|---------|-------------|
 | `--format` | `-f` | `yolo` | Output format: `yolo` or `coco` |
 | `--project` | `-p` | Current dir | Main project path |
+| `--cache-dir` | - | `label_studio_data` | Cache directory for downloads (safe to delete after processing) |
 | `--workers` | `-w` | `4` | Maximum parallel workers |
 | `--memory` | `-m` | `2048` | Memory limit in MB |
 | `--fps-limit` | - | `None` | Limit FPS extraction (e.g., `2.0`) |
