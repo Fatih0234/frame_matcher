@@ -77,7 +77,11 @@ output/
 dataset_fps_test/
 test_multi/
 test_coco/
-label_studio_data
+label_studio_data/
+dataset_multi/
+dataset_coco/
+dataset_yolo/
+dataset_test/
 
 # Video files (large files that shouldn't be in git)
 video_files/

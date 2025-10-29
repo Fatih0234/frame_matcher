@@ -873,6 +873,22 @@ class AnnotationProcessor:
         """Get performance statistics for benchmarking."""
         return self.performance_stats.copy()
 
+    def get_video_stats(self) -> Dict[str, Dict[str, Any]]:
+        """
+        Get video-level statistics for project mapping.
+
+        Returns:
+            Dictionary mapping video names to their statistics:
+            {
+                'video_name': {
+                    'frames': int,
+                    'total_objects': int,
+                    'objects_per_class': Dict[str, int]
+                }
+            }
+        """
+        return self.dataset_analyzer.video_stats.copy()
+
     def convert_with_exporter(self, output_path: Path, exporter):
         """
         Convert annotations using a custom exporter.

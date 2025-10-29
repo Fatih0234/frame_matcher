@@ -28,6 +28,103 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 
 
+def update_project_mapping(
+    output_path: Path,
+    labelstudio_url: str,
+    project_id: int,
+    video_stats: Dict[str, Dict[str, Any]],
+    class_mappings: Dict[str, int]
+) -> None:
+    """
+    Update project_mapping.json with video-level statistics in hierarchical structure.
+    Structure: Label Studio URL -> Project ID -> Videos array
+
+    If a video with the same name already exists for the same project, it will be overwritten.
+
+    Args:
+        output_path: Output directory path
+        labelstudio_url: Label Studio server URL
+        project_id: Project ID
+        video_stats: Dictionary mapping video names to their statistics
+        class_mappings: Class mappings dictionary
+    """
+    mapping_file = output_path / "project_mapping.json"
+
+    # Load existing mapping if it exists
+    existing_mapping = {}
+
+    if mapping_file.exists():
+        try:
+            with open(mapping_file, 'r') as f:
+                existing_mapping = json.load(f)
+        except (json.JSONDecodeError, IOError) as e:
+            logger.warning(f"Could not read existing project_mapping.json: {e}. Creating new file.")
+
+    # Ensure URL exists in mapping
+    if labelstudio_url not in existing_mapping:
+        existing_mapping[labelstudio_url] = {}
+
+    # Ensure project exists under URL
+    project_key = f"project_{project_id}"
+    if project_key not in existing_mapping[labelstudio_url]:
+        existing_mapping[labelstudio_url][project_key] = {
+            'videos': []
+        }
+
+    # Get existing videos for this project
+    existing_videos = existing_mapping[labelstudio_url][project_key]['videos']
+
+    # Create a dict for easy lookup by video name
+    existing_videos_dict = {v['video_name']: v for v in existing_videos}
+
+    # Add or update videos
+    for video_name, stats in video_stats.items():
+        # Calculate average objects per frame
+        avg_objects_per_frame = stats['total_objects'] / stats['frames'] if stats['frames'] > 0 else 0.0
+
+        video_entry = {
+            'video_name': video_name,
+            'frames': stats['frames'],
+            'total_objects': stats['total_objects'],
+            'avg_objects_per_frame': round(avg_objects_per_frame, 2),
+            'class_distribution': stats['objects_per_class']
+        }
+
+        if video_name in existing_videos_dict:
+            logger.info(f"Updating existing video '{video_name}' in project {project_id}")
+            existing_videos_dict[video_name] = video_entry
+        else:
+            logger.info(f"Adding new video '{video_name}' to project {project_id}")
+            existing_videos_dict[video_name] = video_entry
+
+    # Update the videos list with sorted entries
+    existing_mapping[labelstudio_url][project_key]['videos'] = sorted(
+        existing_videos_dict.values(),
+        key=lambda x: x['video_name']
+    )
+
+    # Calculate summary statistics for terminal output
+    total_videos = sum(
+        len(proj['videos'])
+        for url_data in existing_mapping.values()
+        for proj in url_data.values()
+    )
+    total_frames = sum(
+        video['frames']
+        for url_data in existing_mapping.values()
+        for proj in url_data.values()
+        for video in proj['videos']
+    )
+
+    # Save updated mapping
+    with open(mapping_file, 'w') as f:
+        json.dump(existing_mapping, f, indent=2)
+
+    typer.echo(f"\n📊 Project mapping updated: {mapping_file}")
+    typer.echo(f"   • Videos: {total_videos}")
+    typer.echo(f"   • Total frames: {total_frames:,}")
+
+
 def get_available_memory_mb() -> int:
     """
     Get available system memory in MB.
@@ -332,12 +429,12 @@ def process_single_project(
     fps_limit: Optional[float],
     benchmark: bool,
     format: str = "yolo"
-) -> Dict[str, Any]:
+) -> bool:
     """
-    Process a single project and return statistics.
+    Process a single project and update project mapping.
 
     Returns:
-        Dictionary with project statistics including frames_extracted, annotations_count, etc.
+        True if successful, False otherwise
     """
     typer.echo(f"\n{'='*80}")
     typer.echo(f"PROCESSING PROJECT ID: {project_id}")
@@ -358,7 +455,7 @@ def process_single_project(
 
     if not selected_videos:
         typer.echo(f"No videos selected for project {project_id}. Skipping.", err=True)
-        return None
+        return False
 
     selected_task_ids = selector.get_selected_video_tasks(selected_videos)
     typer.echo(f"Will process {len(selected_task_ids)} selected videos")
@@ -375,7 +472,7 @@ def process_single_project(
 
     if not success:
         typer.echo(f"Failed to download data for project {project_id}", err=True)
-        return None
+        return False
 
     annotations_file = Path(annotations_file)
     video_files_dir = workspace_path / f"videos/project_{project_id}"
@@ -383,11 +480,11 @@ def process_single_project(
     # Validate paths
     if not annotations_file.exists():
         typer.echo(f"Error: Annotations file not found at {annotations_file}", err=True)
-        return None
+        return False
 
     if not video_files_dir.exists():
         typer.echo(f"Error: Video files directory not found at {video_files_dir}", err=True)
-        return None
+        return False
 
     # Process annotations with project ID for file naming
     try:
@@ -410,20 +507,15 @@ def process_single_project(
 
         processor.convert_with_exporter(output_path, exporter)
 
-        # Get statistics
-        stats = processor.get_performance_stats()
+        # Get video-level statistics and update project mapping
+        video_stats = processor.get_video_stats()
+        update_project_mapping(output_path, url, project_id, video_stats, class_mappings)
 
-        return {
-            'id': project_id,
-            'title': project_title,
-            'frames_extracted': stats.get('frames_extracted', 0),
-            'annotations_count': stats.get('frames_extracted', 0),  # Each frame has at least one annotation
-            'videos_processed': stats.get('videos_processed', 0)
-        }
+        return True
 
     except Exception as e:
         typer.echo(f"Error processing project {project_id}: {e}", err=True)
-        return None
+        return False
 
 
 def process_multiple_projects(
@@ -460,12 +552,10 @@ def process_multiple_projects(
     typer.echo(f"Processing {len(project_ids)} projects: {project_ids}")
     typer.echo(f"{'='*80}\n")
 
-    project_stats = []
-    total_frames = 0
-    total_annotations = 0
+    successful_projects = 0
 
     for project_id in project_ids:
-        stats = process_single_project(
+        success = process_single_project(
             project_id=project_id,
             url=url,
             api_key=api_key,
@@ -479,31 +569,15 @@ def process_multiple_projects(
             format=format
         )
 
-        if stats:
-            project_stats.append(stats)
-            total_frames += stats['frames_extracted']
-            total_annotations += stats['annotations_count']
+        if success:
+            successful_projects += 1
 
-    # Generate project_mapping.json
-    if project_stats:
-        mapping = {
-            'projects': project_stats,
-            'total_frames': total_frames,
-            'total_annotations': total_annotations,
-            'classes': class_mappings
-        }
-
-        mapping_file = output_path / "project_mapping.json"
-        with open(mapping_file, 'w') as f:
-            json.dump(mapping, f, indent=2)
-
+    # Display summary
+    if successful_projects > 0:
         typer.echo(f"\n{'='*80}")
         typer.echo("MULTI-PROJECT SUMMARY")
         typer.echo(f"{'='*80}")
-        typer.echo(f"Projects processed: {len(project_stats)}/{len(project_ids)}")
-        typer.echo(f"Total frames extracted: {total_frames:,}")
-        typer.echo(f"Total annotations: {total_annotations:,}")
-        typer.echo(f"\nProject mapping saved to: {mapping_file}")
+        typer.echo(f"Projects processed: {successful_projects}/{len(project_ids)}")
         typer.echo(f"{'='*80}\n")
 
 
@@ -512,8 +586,7 @@ def main(
     output_path: str = typer.Option(None, "--output", "-o", help="Path where the final training dataset will be saved (images, labels, configs)"),
     project_path: str = typer.Option(None, "--project", "-p", help="Main project path (default: directory where main.py is located)"),
     cache_dir: str = typer.Option("label_studio_data", "--cache-dir", help="Cache directory for downloaded videos and annotations (default: label_studio_data)"),
-    project_id: Optional[int] = typer.Option(None, "--project-id", help="Single Label Studio project ID (for backward compatibility)"),
-    project_ids: Optional[str] = typer.Option(None, "--project-ids", help="Comma-separated list of project IDs (e.g., '5,7,12')"),
+    project_ids: Optional[str] = typer.Option(None, "--project-ids", help="Single project ID or comma-separated list (e.g., '3' or '5,7,12')"),
     list_projects: bool = typer.Option(False, "--list-projects", help="List all available projects and exit"),
     format: str = typer.Option("yolo", "--format", "-f", help="Output format: 'yolo' or 'coco' (default: yolo)"),
     max_workers: int = typer.Option(4, "--workers", "-w", help="Maximum number of parallel workers (default: 4)"),
@@ -527,7 +600,7 @@ def main(
 
     Features:
     - Multiple export formats (YOLO, COCO)
-    - Multi-project support with automatic project selection
+    - Single and multi-project support with automatic project selection
     - Interactive video selection from Label Studio
     - Automatic download from Label Studio
     - Separate cache and output directories for better organization
@@ -560,11 +633,11 @@ def main(
     # Export in COCO format
     python main.py --classes '{"cyclist":0,"person":1}' --output ./dataset --format coco
 
+    # Process a single project
+    python main.py --classes '{"cyclist":0,"person":1,"scooter-roller":2}' --output ./dataset --project-ids 3
+
     # Process multiple projects
     python main.py --classes '{"cyclist":0,"person":1,"scooter-roller":2}' --output ./dataset --project-ids 5,7,12
-
-    # Single project (backward compatible)
-    python main.py --classes '{"cyclist":0,"person":1,"scooter-roller":2}' --output ./dataset --project-id 5 --format yolo
 
     # Custom cache directory (save disk space by using /tmp)
     python main.py --classes '{"cyclist":0,"person":1}' --output ./dataset --cache-dir /tmp/ls_cache
@@ -596,7 +669,6 @@ def main(
     # Get credentials from environment
     url = os.getenv("LABEL_STUDIO_URL")
     api_key = os.getenv("LABEL_STUDIO_API_KEY")
-    env_project_id = os.getenv("PROJECT_ID")
 
     # Validate environment variables
     if not url or not api_key:
@@ -629,23 +701,18 @@ def main(
     # Determine which project(s) to process
     selected_project_ids: List[int] = []
 
-    # Priority: --project-ids > --project-id > env PROJECT_ID > interactive mode
+    # Priority: --project-ids > interactive mode
     if project_ids:
-        # Parse comma-separated project IDs
+        # Parse single or comma-separated project IDs
         try:
             selected_project_ids = [int(pid.strip()) for pid in project_ids.split(',')]
-            typer.echo(f"Processing projects from --project-ids: {selected_project_ids}")
-        except ValueError as e:
-            typer.echo(f"Error: Invalid format for --project-ids. Use comma-separated numbers (e.g., '5,7,12')", err=True)
+            if len(selected_project_ids) == 1:
+                typer.echo(f"Processing single project: {selected_project_ids[0]}")
+            else:
+                typer.echo(f"Processing {len(selected_project_ids)} projects: {selected_project_ids}")
+        except ValueError:
+            typer.echo("Error: Invalid format for --project-ids. Use a single number (e.g., '3') or comma-separated numbers (e.g., '5,7,12')", err=True)
             raise typer.Exit(1)
-    elif project_id is not None:
-        # Single project mode (backward compatibility)
-        selected_project_ids = [project_id]
-        typer.echo(f"Processing single project (--project-id): {project_id}")
-    elif env_project_id:
-        # Use environment variable (backward compatibility)
-        selected_project_ids = [int(env_project_id)]
-        typer.echo(f"Processing single project from .env (PROJECT_ID): {env_project_id}")
     else:
         # Interactive project selection mode
         typer.echo("No project specified. Entering interactive project selection mode...")
@@ -737,7 +804,8 @@ def main(
                 use_exact_matching=True,
                 max_workers=max_workers,
                 memory_limit_mb=memory_limit,
-                fps_limit=fps_limit
+                fps_limit=fps_limit,
+                project_id=single_project_id  # Add project prefix to filenames
             )
 
             # Create appropriate exporter based on format
@@ -748,6 +816,10 @@ def main(
 
             processor.convert_with_exporter(output_path, exporter)
             typer.echo(f"{format_lower.upper()} dataset created successfully at {output_path}")
+
+            # Get video-level statistics and update project mapping
+            video_stats = processor.get_video_stats()
+            update_project_mapping(output_path, url, single_project_id, video_stats, class_mappings)
 
             total_time = time.time() - total_start_time
             typer.echo(f"\nTotal Runtime: {total_time:.2f}s")

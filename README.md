@@ -48,7 +48,7 @@ python main.py \
 
 **What happens:**
 - Displays all available projects
-- You select which projects to process (e.g., `5,7` or `1-3` or `all`). This is also configurable with `--project-id` parameter.
+- You select which projects to process (e.g., `5,7` or `1-3` or `all`). This is also configurable with `--project-ids` parameter.
 - For each project, select specific videos interactively
 - Downloads videos and annotations automatically to the cache directory
 - Extracts annotated frames with project-specific naming
@@ -80,7 +80,7 @@ python main.py \
   --cache-dir /tmp/label_studio_cache \
   --classes '{"cyclist":0}' \
   --output ./dataset \
-  --project-id 5
+  --project-ids 5
 ```
 
 ## Configuration
@@ -116,8 +116,7 @@ The tool includes automatic memory detection and will warn you if your configura
 | Parameter | Description | Example |
 |-----------|-------------|---------|
 | `--list-projects` | List all available projects and exit | `--list-projects` |
-| `--project-ids` | Comma-separated list of project IDs | `--project-ids 5,7,12` |
-| `--project-id` | Single project ID (backward compatible) | `--project-id 5` |
+| `--project-ids` | Single project ID or comma-separated list | `--project-ids 3` or `--project-ids 5,7,12` |
 | _(none)_ | Interactive project selection mode (default) | - |
 
 ### Optional Parameters

@@ -540,23 +540,22 @@ class TestUtilities:
 class TestBackwardCompatibility:
     """Test backward compatibility with existing workflows."""
 
-    def test_single_project_id_still_works(self):
-        """Test that --project-id (singular) still works for backward compatibility."""
+    def test_single_project_id_parsing(self):
+        """Test that --project-ids works with single project ID."""
         # This should be parsed correctly
-        project_id = 5
-        selected_project_ids = [project_id]
+        project_ids_str = "5"
+        selected_project_ids = [int(pid.strip()) for pid in project_ids_str.split(',')]
 
         assert len(selected_project_ids) == 1
         assert selected_project_ids[0] == 5
 
-    def test_env_project_id_fallback(self, monkeypatch):
-        """Test that PROJECT_ID from .env is used as fallback."""
-        monkeypatch.setenv("PROJECT_ID", "5")
-        env_project_id = os.getenv("PROJECT_ID")
+    def test_multiple_project_ids_parsing(self):
+        """Test that --project-ids works with multiple comma-separated IDs."""
+        project_ids_str = "5,7,12"
+        selected_project_ids = [int(pid.strip()) for pid in project_ids_str.split(',')]
 
-        if env_project_id:
-            project_id = int(env_project_id)
-            assert project_id == 5
+        assert len(selected_project_ids) == 3
+        assert selected_project_ids == [5, 7, 12]
 
 
 # ============================================================================
